@@ -2,7 +2,6 @@ name: Status Mover
 
 on:
   push:
-    branches: [ main, master ]
   workflow_dispatch:
 
 permissions:
@@ -139,8 +138,7 @@ jobs:
                           Toast.makeText(this, "Grant overlay permission first", Toast.LENGTH_LONG).show();
                           return;
                       }
-                      Intent i = new Intent(this, OverlayService.class);
-                      startForegroundService(i);
+                      startForegroundService(new Intent(this, OverlayService.class));
                   });
                   root.addView(start);
 
@@ -153,10 +151,10 @@ jobs:
                   toggle(root, "Cover real status bar icons", "cover_on", false);
                   toggle(root, "Cover color: black (off = white)", "cover_dark", true);
                   toggle(root, "Icon color: white (off = black)", "icon_white", true);
+                  toggle(root, "Fixed look like photo (off = live data)", "fixed", true);
 
-                  section(root, "Signal", "signal", 30, 20, 18);
-                  section(root, "Wi-Fi", "wifi", 120, 20, 18);
-                  section(root, "Battery %", "battery", 300, 20, 14);
+                  section(root, "Signal", "signal", 40, 25, 22);
+                  section(root, "Wi-Fi", "wifi", 130, 25, 22);
               }
 
               void section(LinearLayout root, String name, String key, int x, int y, int size) {
@@ -164,7 +162,7 @@ jobs:
                   toggle(root, "Show " + name, key + "_on", true);
                   seek(root, "X position", key + "_x", -3000, 3000, x);
                   seek(root, "Y position", key + "_y", -3000, 3000, y);
-                  seek(root, "Size", key + "_size", 6, 100, size);
+                  seek(root, "Size", key + "_size", 6, 150, size);
               }
 
               void title(LinearLayout root, String t) {
@@ -214,35 +212,28 @@ jobs:
           import android.net.wifi.WifiManager;
           import android.os.*;
           import android.telephony.TelephonyManager;
-          import android.util.TypedValue;
           import android.view.*;
-          import android.widget.TextView;
 
           public class OverlayService extends Service implements SharedPreferences.OnSharedPreferenceChangeListener {
-              static final String[] KEYS = {"signal", "wifi", "battery"};
+              static final String[] KEYS = {"signal", "wifi"};
 
               WindowManager wm;
               SharedPreferences p;
-              View[] views = new View[3];
-              boolean[] attached = new boolean[3];
-              WindowManager.LayoutParams[] lps = new WindowManager.LayoutParams[3];
+              IconView[] views = new IconView[2];
+              boolean[] attached = new boolean[2];
+              WindowManager.LayoutParams[] lps = new WindowManager.LayoutParams[2];
               View cover;
               WindowManager.LayoutParams coverLp;
               boolean coverAttached = false;
               Handler h = new Handler(Looper.getMainLooper());
               float dp;
 
-              final BroadcastReceiver batt = new BroadcastReceiver() {
-                  public void onReceive(Context c, Intent i) {
-                      int l = i.getIntExtra(BatteryManager.EXTRA_LEVEL, 0);
-                      int s = i.getIntExtra(BatteryManager.EXTRA_SCALE, 100);
-                      ((TextView) views[2]).setText((l * 100 / s) + "%");
-                  }
-              };
-
-              final Runnable poll = new Runnable() {
-                  public void run() {
-                      int wifiLevel = 0, sigLevel = 0;
+              void updateLevels() {
+                  int wifiLevel = 0, sigLevel = 0;
+                  if (p.getBoolean("fixed", true)) {
+                      sigLevel = 3;
+                      wifiLevel = 4;
+                  } else {
                       try {
                           WifiManager w = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
                           int rssi = w.getConnectionInfo().getRssi();
@@ -252,10 +243,16 @@ jobs:
                           TelephonyManager t = (TelephonyManager) getSystemService(TELEPHONY_SERVICE);
                           sigLevel = t.getSignalStrength().getLevel();
                       } catch (Exception e) { sigLevel = 0; }
-                      ((IconView) views[0]).level = sigLevel;
-                      ((IconView) views[1]).level = wifiLevel;
-                      views[0].invalidate();
-                      views[1].invalidate();
+                  }
+                  views[0].level = sigLevel;
+                  views[1].level = wifiLevel;
+                  views[0].invalidate();
+                  views[1].invalidate();
+              }
+
+              final Runnable poll = new Runnable() {
+                  public void run() {
+                      updateLevels();
                       h.postDelayed(this, 2000);
                   }
               };
@@ -278,12 +275,7 @@ jobs:
 
                   views[0] = new IconView(this, false);
                   views[1] = new IconView(this, true);
-                  TextView tv = new TextView(this);
-                  tv.setTypeface(Typeface.DEFAULT_BOLD);
-                  tv.setText("--%");
-                  views[2] = tv;
-
-                  for (int i = 0; i < 3; i++)
+                  for (int i = 0; i < 2; i++)
                       lps[i] = makeLp(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT);
 
                   cover = new View(this);
@@ -292,7 +284,6 @@ jobs:
                   if (id > 0) sbh = getResources().getDimensionPixelSize(id);
                   coverLp = makeLp(WindowManager.LayoutParams.MATCH_PARENT, sbh > 0 ? sbh : (int) (28 * dp));
 
-                  registerReceiver(batt, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
                   p.registerOnSharedPreferenceChangeListener(this);
                   rebuild();
                   h.post(poll);
@@ -311,7 +302,7 @@ jobs:
               }
 
               void rebuild() {
-                  for (int i = 0; i < 3; i++) detach(i);
+                  for (int i = 0; i < 2; i++) detach(i);
                   if (coverAttached) { try { wm.removeView(cover); } catch (Exception e) {} coverAttached = false; }
                   if (p.getBoolean("cover_on", false)) {
                       cover.setBackgroundColor(p.getBoolean("cover_dark", true) ? Color.BLACK : Color.WHITE);
@@ -327,28 +318,22 @@ jobs:
 
               void applyAll() {
                   int color = p.getBoolean("icon_white", true) ? Color.WHITE : Color.BLACK;
-                  int[] defX = {30, 120, 300};
-                  for (int i = 0; i < 3; i++) {
+                  int[] defX = {40, 130};
+                  for (int i = 0; i < 2; i++) {
                       String k = KEYS[i];
                       boolean on = p.getBoolean(k + "_on", true);
-                      int size = p.getInt(k + "_size", i == 2 ? 14 : 18);
+                      int size = p.getInt(k + "_size", 22);
                       lps[i].x = p.getInt(k + "_x", defX[i]);
-                      lps[i].y = p.getInt(k + "_y", 20);
-                      if (i == 2) {
-                          TextView tv = (TextView) views[2];
-                          tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, size);
-                          tv.setTextColor(color);
-                      } else {
-                          IconView iv = (IconView) views[i];
-                          iv.sizePx = (int) (size * dp);
-                          iv.paint.setColor(color);
-                          iv.requestLayout();
-                          iv.invalidate();
-                      }
+                      lps[i].y = p.getInt(k + "_y", 25);
+                      views[i].sizePx = (int) (size * dp);
+                      views[i].color = color;
+                      views[i].requestLayout();
+                      views[i].invalidate();
                       if (on && !attached[i]) { wm.addView(views[i], lps[i]); attached[i] = true; }
                       else if (!on) detach(i);
                       else wm.updateViewLayout(views[i], lps[i]);
                   }
+                  updateLevels();
               }
 
               @Override
@@ -360,52 +345,72 @@ jobs:
               public void onDestroy() {
                   h.removeCallbacksAndMessages(null);
                   p.unregisterOnSharedPreferenceChangeListener(this);
-                  try { unregisterReceiver(batt); } catch (Exception e) {}
-                  for (int i = 0; i < 3; i++) detach(i);
+                  for (int i = 0; i < 2; i++) detach(i);
                   if (coverAttached) { try { wm.removeView(cover); } catch (Exception e) {} }
                   super.onDestroy();
               }
 
               static class IconView extends View {
                   final boolean wifi;
-                  int level = 0, sizePx = 50;
+                  int level = 4, sizePx = 60, color = Color.WHITE;
                   final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                  final RectF r = new RectF();
 
                   IconView(Context c, boolean wifi) {
                       super(c);
                       this.wifi = wifi;
-                      paint.setColor(Color.WHITE);
                   }
 
                   @Override
-                  protected void onMeasure(int w, int h) { setMeasuredDimension(sizePx, sizePx); }
+                  protected void onMeasure(int w, int h) {
+                      setMeasuredDimension(sizePx, (int) (sizePx * (wifi ? 0.78f : 0.70f)));
+                  }
 
                   @Override
                   protected void onDraw(Canvas c) {
-                      float s = sizePx;
+                      float w = sizePx;
+                      float h = getHeight();
                       if (!wifi) {
-                          float bw = s / 7f;
+                          // iOS style signal: 4 rounded bars rising left to right
+                          float u = w / 16.5f;
+                          float bw = 3f * u;
+                          float[] hs = {4f, 6.5f, 9f, 11.5f};
                           paint.setStyle(Paint.Style.FILL);
                           for (int i = 0; i < 4; i++) {
-                              paint.setAlpha(level >= i + 1 ? 255 : 90);
-                              float left = i * bw * 1.8f;
-                              float top = s - s * (i + 1) / 4f;
-                              c.drawRoundRect(left, top, left + bw, s, bw / 3, bw / 3, paint);
+                              paint.setColor(color);
+                              paint.setAlpha(level >= i + 1 ? 255 : 100);
+                              float left = i * 4.5f * u;
+                              float hh = hs[i] * u;
+                              c.drawRoundRect(left, h - hh, left + bw, h, u, u, paint);
                           }
                       } else {
-                          int active = level >= 4 ? 3 : level >= 3 ? 2 : level >= 1 ? 1 : 0;
+                          // iOS style wifi: filled wedge + two curved bands
+                          int lit = level >= 4 ? 3 : level >= 3 ? 2 : level >= 1 ? 1 : 0;
+                          float cx = w / 2f;
+                          float cy = 0.74f * w;
+                          float sw = 0.13f * w;
+                          float[] radii = {0.42f * w, 0.66f * w};
                           paint.setStyle(Paint.Style.STROKE);
-                          paint.setStrokeWidth(s / 9f);
+                          paint.setStrokeWidth(sw);
                           paint.setStrokeCap(Paint.Cap.ROUND);
-                          float cx = s / 2f, cy = s * 0.9f;
-                          for (int i = 0; i < 3; i++) {
-                              float r = s * (0.3f + 0.25f * i);
-                              paint.setAlpha(i < active ? 255 : 90);
-                              c.drawArc(cx - r, cy - r, cx + r, cy + r, 225, 90, false, paint);
+                          for (int i = 0; i < 2; i++) {
+                              float rad = radii[i];
+                              float cap = (float) Math.toDegrees((sw / 2f) / rad);
+                              float sweep = 90f - 2f * cap;
+                              float start = 270f - sweep / 2f;
+                              r.set(cx - rad, cy - rad, cx + rad, cy + rad);
+                              paint.setColor(color);
+                              paint.setAlpha(lit >= i + 2 ? 255 : 100);
+                              c.drawArc(r, start, sweep, false, paint);
                           }
-                          paint.setStyle(Paint.Style.FILL);
-                          paint.setAlpha(255);
-                          c.drawCircle(cx, cy, s / 12f, paint);
+                          paint.setStyle(Paint.Style.FILL_AND_STROKE);
+                          paint.setStrokeWidth(0.05f * w);
+                          paint.setStrokeJoin(Paint.Join.ROUND);
+                          float rad = 0.22f * w;
+                          r.set(cx - rad, cy - rad, cx + rad, cy + rad);
+                          paint.setColor(color);
+                          paint.setAlpha(lit >= 1 ? 255 : 100);
+                          c.drawArc(r, 225f, 90f, true, paint);
                       }
                   }
               }
@@ -442,4 +447,4 @@ jobs:
           gh release create "v${{ github.run_number }}" app/build/outputs/apk/debug/app-debug.apk \
             --target "${{ github.sha }}" \
             --title "Status Mover v${{ github.run_number }}" \
-            --notes "Draggable signal, Wi-Fi and battery % overlay."
+            --notes "Draggable iOS-style signal and Wi-Fi overlay."
