@@ -11,7 +11,10 @@ permissions:
 jobs:
   apk:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -20,6 +23,11 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools platforms;android-34 build-tools;34.0.0"
 
       - name: Write the app
         run: |
@@ -148,21 +156,42 @@ jobs:
           </body>
           </html>
           EOF
+          test -s app/www/index.html
 
       - name: Create Android project
         working-directory: app
         run: |
-          npm init -y
-          npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
-          npx cap init "Photo Overlay Studio" com.photooverlay.studio --web-dir www
+          cat > package.json <<'EOF'
+          {
+            "name": "photo-overlay-studio",
+            "version": "1.0.0",
+            "private": true,
+            "dependencies": {
+              "@capacitor/android": "6.2.0",
+              "@capacitor/cli": "6.2.0",
+              "@capacitor/core": "6.2.0"
+            }
+          }
+          EOF
+          cat > capacitor.config.json <<'EOF'
+          {
+            "appId": "com.photooverlay.studio",
+            "appName": "Photo Overlay Studio",
+            "webDir": "www"
+          }
+          EOF
+          npm install
           npx cap add android
           npx cap sync android
+
+      - name: Point Gradle at the Android SDK
+        run: echo "sdk.dir=$ANDROID_HOME" > app/android/local.properties
 
       - name: Build APK
         working-directory: app/android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Rename APK
         run: cp app/android/app/build/outputs/apk/debug/app-debug.apk PhotoOverlayStudio.apk
@@ -174,10 +203,11 @@ jobs:
           path: PhotoOverlayStudio.apk
 
       - name: Publish to Releases
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v${{ github.run_number }}" PhotoOverlayStudio.apk \
+          gh release create "v${{ github.run_number }}-${{ github.run_attempt }}" PhotoOverlayStudio.apk \
             --repo "${{ github.repository }}" \
             --target "${{ github.sha }}" \
             --title "Photo Overlay Studio v${{ github.run_number }}" \
