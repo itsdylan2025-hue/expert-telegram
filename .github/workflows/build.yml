@@ -1,0 +1,433 @@
+name: Status Mover
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate project files
+        run: |
+          mkdir -p app/src/main/java/com/example/statusmover
+
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "StatusMover"
+          include ':app'
+          EOF
+
+          cat > build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.5.2' apply false
+          }
+          EOF
+
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2g
+          android.useAndroidX=false
+          EOF
+
+          cat > app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+          }
+          android {
+              namespace 'com.example.statusmover'
+              compileSdk 34
+              defaultConfig {
+                  applicationId "com.example.statusmover"
+                  minSdk 28
+                  targetSdk 33
+                  versionCode 1
+                  versionName "1.0"
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <application
+                  android:label="Status Mover"
+                  android:theme="@android:style/Theme.DeviceDefault.Light">
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+                  <service android:name=".OverlayService" android:exported="false" />
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/java/com/example/statusmover/MainActivity.java <<'EOF'
+          package com.example.statusmover;
+
+          import android.app.Activity;
+          import android.content.Intent;
+          import android.content.SharedPreferences;
+          import android.net.Uri;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.provider.Settings;
+          import android.widget.*;
+
+          public class MainActivity extends Activity {
+              static final String PREFS = "cfg";
+              SharedPreferences p;
+
+              @Override
+              protected void onCreate(Bundle b) {
+                  super.onCreate(b);
+                  p = getSharedPreferences(PREFS, MODE_PRIVATE);
+                  if (Build.VERSION.SDK_INT >= 33) {
+                      requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 1);
+                  }
+                  ScrollView sv = new ScrollView(this);
+                  LinearLayout root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+                  int pad = (int) (16 * getResources().getDisplayMetrics().density);
+                  root.setPadding(pad, pad, pad, pad);
+                  sv.addView(root);
+                  setContentView(sv);
+
+                  title(root, "Status Mover");
+
+                  Button perm = new Button(this);
+                  perm.setText("1) Grant 'Display over other apps'");
+                  perm.setOnClickListener(v -> startActivity(new Intent(
+                          Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                          Uri.parse("package:" + getPackageName()))));
+                  root.addView(perm);
+
+                  Button start = new Button(this);
+                  start.setText("2) Start overlay");
+                  start.setOnClickListener(v -> {
+                      if (!Settings.canDrawOverlays(this)) {
+                          Toast.makeText(this, "Grant overlay permission first", Toast.LENGTH_LONG).show();
+                          return;
+                      }
+                      Intent i = new Intent(this, OverlayService.class);
+                      startForegroundService(i);
+                  });
+                  root.addView(start);
+
+                  Button stop = new Button(this);
+                  stop.setText("Stop overlay");
+                  stop.setOnClickListener(v -> stopService(new Intent(this, OverlayService.class)));
+                  root.addView(stop);
+
+                  title(root, "Global");
+                  toggle(root, "Cover real status bar icons", "cover_on", false);
+                  toggle(root, "Cover color: black (off = white)", "cover_dark", true);
+                  toggle(root, "Icon color: white (off = black)", "icon_white", true);
+
+                  section(root, "Signal", "signal", 30, 20, 18);
+                  section(root, "Wi-Fi", "wifi", 120, 20, 18);
+                  section(root, "Battery %", "battery", 300, 20, 14);
+              }
+
+              void section(LinearLayout root, String name, String key, int x, int y, int size) {
+                  title(root, name);
+                  toggle(root, "Show " + name, key + "_on", true);
+                  seek(root, "X position", key + "_x", -3000, 3000, x);
+                  seek(root, "Y position", key + "_y", -3000, 3000, y);
+                  seek(root, "Size", key + "_size", 6, 100, size);
+              }
+
+              void title(LinearLayout root, String t) {
+                  TextView tv = new TextView(this);
+                  tv.setText(t);
+                  tv.setTextSize(20);
+                  tv.setPadding(0, 40, 0, 10);
+                  root.addView(tv);
+              }
+
+              void toggle(LinearLayout root, String label, final String key, boolean def) {
+                  Switch s = new Switch(this);
+                  s.setText(label);
+                  s.setChecked(p.getBoolean(key, def));
+                  s.setOnCheckedChangeListener((v, c) -> p.edit().putBoolean(key, c).apply());
+                  root.addView(s);
+              }
+
+              void seek(LinearLayout root, final String label, final String key, final int min, int max, int def) {
+                  final TextView tv = new TextView(this);
+                  int cur = p.getInt(key, def);
+                  tv.setText(label + ": " + cur);
+                  SeekBar sb = new SeekBar(this);
+                  sb.setMax(max - min);
+                  sb.setProgress(cur - min);
+                  sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                      public void onProgressChanged(SeekBar s, int prog, boolean user) {
+                          int v = prog + min;
+                          tv.setText(label + ": " + v);
+                          p.edit().putInt(key, v).apply();
+                      }
+                      public void onStartTrackingTouch(SeekBar s) {}
+                      public void onStopTrackingTouch(SeekBar s) {}
+                  });
+                  root.addView(tv);
+                  root.addView(sb);
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/example/statusmover/OverlayService.java <<'EOF'
+          package com.example.statusmover;
+
+          import android.app.*;
+          import android.content.*;
+          import android.graphics.*;
+          import android.net.wifi.WifiManager;
+          import android.os.*;
+          import android.telephony.TelephonyManager;
+          import android.util.TypedValue;
+          import android.view.*;
+          import android.widget.TextView;
+
+          public class OverlayService extends Service implements SharedPreferences.OnSharedPreferenceChangeListener {
+              static final String[] KEYS = {"signal", "wifi", "battery"};
+
+              WindowManager wm;
+              SharedPreferences p;
+              View[] views = new View[3];
+              boolean[] attached = new boolean[3];
+              WindowManager.LayoutParams[] lps = new WindowManager.LayoutParams[3];
+              View cover;
+              WindowManager.LayoutParams coverLp;
+              boolean coverAttached = false;
+              Handler h = new Handler(Looper.getMainLooper());
+              float dp;
+
+              final BroadcastReceiver batt = new BroadcastReceiver() {
+                  public void onReceive(Context c, Intent i) {
+                      int l = i.getIntExtra(BatteryManager.EXTRA_LEVEL, 0);
+                      int s = i.getIntExtra(BatteryManager.EXTRA_SCALE, 100);
+                      ((TextView) views[2]).setText((l * 100 / s) + "%");
+                  }
+              };
+
+              final Runnable poll = new Runnable() {
+                  public void run() {
+                      int wifiLevel = 0, sigLevel = 0;
+                      try {
+                          WifiManager w = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
+                          int rssi = w.getConnectionInfo().getRssi();
+                          wifiLevel = rssi >= -55 ? 4 : rssi >= -65 ? 3 : rssi >= -75 ? 2 : rssi >= -85 ? 1 : 0;
+                      } catch (Exception e) { wifiLevel = 0; }
+                      try {
+                          TelephonyManager t = (TelephonyManager) getSystemService(TELEPHONY_SERVICE);
+                          sigLevel = t.getSignalStrength().getLevel();
+                      } catch (Exception e) { sigLevel = 0; }
+                      ((IconView) views[0]).level = sigLevel;
+                      ((IconView) views[1]).level = wifiLevel;
+                      views[0].invalidate();
+                      views[1].invalidate();
+                      h.postDelayed(this, 2000);
+                  }
+              };
+
+              @Override public IBinder onBind(Intent i) { return null; }
+
+              @Override
+              public void onCreate() {
+                  super.onCreate();
+                  dp = getResources().getDisplayMetrics().density;
+                  wm = (WindowManager) getSystemService(WINDOW_SERVICE);
+                  p = getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE);
+
+                  NotificationChannel ch = new NotificationChannel("sm", "Status Mover", NotificationManager.IMPORTANCE_MIN);
+                  getSystemService(NotificationManager.class).createNotificationChannel(ch);
+                  Notification n = new Notification.Builder(this, "sm")
+                          .setContentTitle("Status Mover running")
+                          .setSmallIcon(android.R.drawable.ic_menu_manage).build();
+                  startForeground(1, n);
+
+                  views[0] = new IconView(this, false);
+                  views[1] = new IconView(this, true);
+                  TextView tv = new TextView(this);
+                  tv.setTypeface(Typeface.DEFAULT_BOLD);
+                  tv.setText("--%");
+                  views[2] = tv;
+
+                  for (int i = 0; i < 3; i++)
+                      lps[i] = makeLp(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT);
+
+                  cover = new View(this);
+                  int sbh = 0;
+                  int id = getResources().getIdentifier("status_bar_height", "dimen", "android");
+                  if (id > 0) sbh = getResources().getDimensionPixelSize(id);
+                  coverLp = makeLp(WindowManager.LayoutParams.MATCH_PARENT, sbh > 0 ? sbh : (int) (28 * dp));
+
+                  registerReceiver(batt, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+                  p.registerOnSharedPreferenceChangeListener(this);
+                  rebuild();
+                  h.post(poll);
+              }
+
+              WindowManager.LayoutParams makeLp(int w, int hgt) {
+                  WindowManager.LayoutParams lp = new WindowManager.LayoutParams(w, hgt,
+                          WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                          WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                                  | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                                  | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                                  | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                          PixelFormat.TRANSLUCENT);
+                  lp.gravity = Gravity.TOP | Gravity.START;
+                  return lp;
+              }
+
+              void rebuild() {
+                  for (int i = 0; i < 3; i++) detach(i);
+                  if (coverAttached) { try { wm.removeView(cover); } catch (Exception e) {} coverAttached = false; }
+                  if (p.getBoolean("cover_on", false)) {
+                      cover.setBackgroundColor(p.getBoolean("cover_dark", true) ? Color.BLACK : Color.WHITE);
+                      wm.addView(cover, coverLp);
+                      coverAttached = true;
+                  }
+                  applyAll();
+              }
+
+              void detach(int i) {
+                  if (attached[i]) { try { wm.removeView(views[i]); } catch (Exception e) {} attached[i] = false; }
+              }
+
+              void applyAll() {
+                  int color = p.getBoolean("icon_white", true) ? Color.WHITE : Color.BLACK;
+                  int[] defX = {30, 120, 300};
+                  for (int i = 0; i < 3; i++) {
+                      String k = KEYS[i];
+                      boolean on = p.getBoolean(k + "_on", true);
+                      int size = p.getInt(k + "_size", i == 2 ? 14 : 18);
+                      lps[i].x = p.getInt(k + "_x", defX[i]);
+                      lps[i].y = p.getInt(k + "_y", 20);
+                      if (i == 2) {
+                          TextView tv = (TextView) views[2];
+                          tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, size);
+                          tv.setTextColor(color);
+                      } else {
+                          IconView iv = (IconView) views[i];
+                          iv.sizePx = (int) (size * dp);
+                          iv.paint.setColor(color);
+                          iv.requestLayout();
+                          iv.invalidate();
+                      }
+                      if (on && !attached[i]) { wm.addView(views[i], lps[i]); attached[i] = true; }
+                      else if (!on) detach(i);
+                      else wm.updateViewLayout(views[i], lps[i]);
+                  }
+              }
+
+              @Override
+              public void onSharedPreferenceChanged(SharedPreferences sp, String key) {
+                  if (key != null && key.startsWith("cover")) rebuild(); else applyAll();
+              }
+
+              @Override
+              public void onDestroy() {
+                  h.removeCallbacksAndMessages(null);
+                  p.unregisterOnSharedPreferenceChangeListener(this);
+                  try { unregisterReceiver(batt); } catch (Exception e) {}
+                  for (int i = 0; i < 3; i++) detach(i);
+                  if (coverAttached) { try { wm.removeView(cover); } catch (Exception e) {} }
+                  super.onDestroy();
+              }
+
+              static class IconView extends View {
+                  final boolean wifi;
+                  int level = 0, sizePx = 50;
+                  final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+                  IconView(Context c, boolean wifi) {
+                      super(c);
+                      this.wifi = wifi;
+                      paint.setColor(Color.WHITE);
+                  }
+
+                  @Override
+                  protected void onMeasure(int w, int h) { setMeasuredDimension(sizePx, sizePx); }
+
+                  @Override
+                  protected void onDraw(Canvas c) {
+                      float s = sizePx;
+                      if (!wifi) {
+                          float bw = s / 7f;
+                          paint.setStyle(Paint.Style.FILL);
+                          for (int i = 0; i < 4; i++) {
+                              paint.setAlpha(level >= i + 1 ? 255 : 90);
+                              float left = i * bw * 1.8f;
+                              float top = s - s * (i + 1) / 4f;
+                              c.drawRoundRect(left, top, left + bw, s, bw / 3, bw / 3, paint);
+                          }
+                      } else {
+                          int active = level >= 4 ? 3 : level >= 3 ? 2 : level >= 1 ? 1 : 0;
+                          paint.setStyle(Paint.Style.STROKE);
+                          paint.setStrokeWidth(s / 9f);
+                          paint.setStrokeCap(Paint.Cap.ROUND);
+                          float cx = s / 2f, cy = s * 0.9f;
+                          for (int i = 0; i < 3; i++) {
+                              float r = s * (0.3f + 0.25f * i);
+                              paint.setAlpha(i < active ? 255 : 90);
+                              c.drawArc(cx - r, cy - r, cx + r, cy + r, 225, 90, false, paint);
+                          }
+                          paint.setStyle(Paint.Style.FILL);
+                          paint.setAlpha(255);
+                          c.drawCircle(cx, cy, s / 12f, paint);
+                      }
+                  }
+              }
+          }
+          EOF
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+
+      - name: Build debug APK
+        run: gradle assembleDebug --no-daemon
+
+      - name: Publish APK as a GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ github.run_number }}" app/build/outputs/apk/debug/app-debug.apk \
+            --repo "${{ github.repository }}" \
+            --title "Status Mover v${{ github.run_number }}" \
+            --notes "Draggable signal, Wi-Fi and battery % overlay."
