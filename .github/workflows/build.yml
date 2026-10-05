@@ -12,6 +12,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Generate project files
         run: |
           mkdir -p app/src/main/java/com/example/statusmover
@@ -415,6 +418,9 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      - name: Accept Android SDK licenses
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -423,11 +429,17 @@ jobs:
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon
 
+      - name: Save APK as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StatusMover-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
+
       - name: Publish APK as a GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "v${{ github.run_number }}" app/build/outputs/apk/debug/app-debug.apk \
-            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
             --title "Status Mover v${{ github.run_number }}" \
             --notes "Draggable signal, Wi-Fi and battery % overlay."
