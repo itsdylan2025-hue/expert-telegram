@@ -29,138 +29,11 @@ jobs:
         with:
           packages: "platform-tools platforms;android-34 build-tools;34.0.0"
 
-      - name: Write the app
+      - name: Create Android project
         run: |
           mkdir -p app/www
-          cat > app/www/index.html <<'EOF'
-          <!doctype html>
-          <html>
-          <head>
-          <meta charset="utf-8">
-          <meta name="viewport" content="width=device-width,initial-scale=1">
-          <title>Photo Overlay Studio</title>
-          <style>
-            *{box-sizing:border-box}
-            body{margin:0;font-family:system-ui,sans-serif;background:#111;color:#eee;padding:12px}
-            h1{font-size:20px;margin:0 0 10px}
-            #stage{position:relative;width:100%;max-width:900px;aspect-ratio:16/10;margin:0 auto 12px;background:#222 repeating-conic-gradient(#2a2a2a 0 25%,#222 0 50%) 0 0/24px 24px;border:2px solid #555;overflow:hidden;touch-action:none}
-            #stage img{position:absolute;user-select:none;-webkit-user-drag:none;cursor:grab}
-            #stage img.sel{outline:2px dashed #4af}
-            #panel{max-width:900px;margin:0 auto}
-            button,label.btn{background:#333;color:#eee;border:1px solid #666;border-radius:8px;padding:8px 12px;cursor:pointer;font-size:14px;display:inline-block}
-            button:active{background:#555}
-            #chips{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
-            .chip.on{background:#4af;color:#000}
-            .row{display:flex;align-items:center;gap:8px;margin:8px 0}
-            .row span.n{width:90px}
-            .row input[type=range]{flex:1}
-            .row output{width:50px;text-align:right}
-            #pad{display:grid;grid-template-columns:repeat(3,56px);gap:6px;margin:10px 0}
-            #pad button{padding:12px 0;font-size:18px}
-            #pad .sp{visibility:hidden}
-          </style>
-          </head>
-          <body>
-          <h1>Photo Overlay Studio</h1>
-          <div id="stage"></div>
-          <div id="panel">
-            <label class="btn">+ Add photos<input id="file" type="file" accept="image/*" multiple hidden></label>
-            <div id="chips"></div>
-            <div id="ctl" hidden>
-              <div class="row"><span class="n">Size</span><input id="s" type="range" min="2" max="400" step="1"><output id="so"></output></div>
-              <div class="row"><span class="n">X (left/right)</span><input id="x" type="range" min="-150" max="250" step="0.5"><output id="xo"></output></div>
-              <div class="row"><span class="n">Y (up/down)</span><input id="y" type="range" min="-150" max="250" step="0.5"><output id="yo"></output></div>
-              <div class="row"><span class="n">Rotate</span><input id="r" type="range" min="-180" max="180" step="1"><output id="ro"></output></div>
-              <div class="row"><span class="n">Opacity</span><input id="o" type="range" min="0" max="100" step="1"><output id="oo"></output></div>
-              <div id="pad">
-                <span class="sp"></span><button data-d="0,-1">&#9650;</button><span class="sp"></span>
-                <button data-d="-1,0">&#9664;</button><button data-d="0,1">&#9660;</button><button data-d="1,0">&#9654;</button>
-              </div>
-              <button id="front">Bring to front</button>
-              <button id="back">Send to back</button>
-              <button id="del">Delete</button>
-            </div>
-          </div>
-          <script>
-          const stage=document.getElementById('stage'),chips=document.getElementById('chips'),ctl=document.getElementById('ctl');
-          const $=id=>document.getElementById(id);
-          let layers=[],cur=null,z=1;
-          function apply(l){
-            const e=l.el;
-            e.style.left=l.x+'%';e.style.top=l.y+'%';e.style.width=l.s+'%';
-            e.style.opacity=l.o/100;
-            e.style.transform='translate(-50%,-50%) rotate('+l.r+'deg)';
-            e.style.zIndex=l.z;
-            e.classList.toggle('sel',l===cur);
-          }
-          function refresh(){
-            chips.innerHTML='';
-            layers.forEach((l,i)=>{
-              const b=document.createElement('button');
-              b.className='chip'+(l===cur?' on':'');
-              b.textContent=(i+1)+'. '+l.name.slice(0,14);
-              b.onclick=()=>select(l);
-              chips.appendChild(b);
-            });
-            ctl.hidden=!cur;
-            if(cur){
-              [['s','s'],['x','x'],['y','y'],['r','r'],['o','o']].forEach(([k,p])=>{
-                $(k).value=cur[p];$(k+'o').textContent=cur[p];
-              });
-            }
-            layers.forEach(apply);
-          }
-          function select(l){cur=l;refresh();}
-          $('file').onchange=e=>{
-            [...e.target.files].forEach(f=>{
-              const img=document.createElement('img');
-              img.src=URL.createObjectURL(f);
-              img.draggable=false;
-              const l={name:f.name,el:img,x:50,y:50,s:40,r:0,o:100,z:z++};
-              layers.push(l);stage.appendChild(img);
-              img.addEventListener('pointerdown',ev=>{
-                ev.preventDefault();select(l);
-                const rect=stage.getBoundingClientRect();
-                const sx=ev.clientX,sy=ev.clientY,ox=l.x,oy=l.y;
-                img.setPointerCapture(ev.pointerId);
-                const mv=m=>{
-                  l.x=Math.round((ox+(m.clientX-sx)/rect.width*100)*2)/2;
-                  l.y=Math.round((oy+(m.clientY-sy)/rect.height*100)*2)/2;
-                  refresh();
-                };
-                const up=()=>{img.removeEventListener('pointermove',mv);img.removeEventListener('pointerup',up);};
-                img.addEventListener('pointermove',mv);img.addEventListener('pointerup',up);
-              });
-              select(l);
-            });
-            e.target.value='';
-          };
-          ['s','x','y','r','o'].forEach(k=>{
-            $(k).oninput=()=>{if(cur){cur[k]=parseFloat($(k).value);refresh();}};
-          });
-          document.querySelectorAll('#pad button').forEach(b=>{
-            b.onclick=()=>{
-              if(!cur)return;
-              const [dx,dy]=b.dataset.d.split(',').map(Number);
-              cur.x+=dx;cur.y+=dy;refresh();
-            };
-          });
-          $('front').onclick=()=>{if(cur){cur.z=z++;refresh();}};
-          $('back').onclick=()=>{if(cur){cur.z=Math.min(...layers.map(l=>l.z))-1;refresh();}};
-          $('del').onclick=()=>{
-            if(!cur)return;
-            cur.el.remove();layers=layers.filter(l=>l!==cur);
-            cur=layers[layers.length-1]||null;refresh();
-          };
-          </script>
-          </body>
-          </html>
-          EOF
-          test -s app/www/index.html
-
-      - name: Create Android project
-        working-directory: app
-        run: |
+          echo '<!doctype html><html><body>overlay</body></html>' > app/www/index.html
+          cd app
           cat > package.json <<'EOF'
           {
             "name": "photo-overlay-studio",
@@ -183,6 +56,648 @@ jobs:
           npm install
           npx cap add android
           npx cap sync android
+
+      - name: Write native manifest
+        run: |
+          cat > app/android/app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+              <application
+                  android:allowBackup="true"
+                  android:icon="@mipmap/ic_launcher"
+                  android:label="Photo Overlay Studio"
+                  android:theme="@android:style/Theme.Material.NoActionBar">
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+                  <service
+                      android:name=".OverlayService"
+                      android:exported="false"
+                      android:foregroundServiceType="specialUse">
+                      <property
+                          android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                          android:value="photo_overlay"/>
+                  </service>
+              </application>
+          </manifest>
+          EOF
+
+      - name: Write Store.java
+        run: |
+          mkdir -p app/android/app/src/main/java/com/photooverlay/studio
+          cat > app/android/app/src/main/java/com/photooverlay/studio/Store.java <<'EOF'
+          package com.photooverlay.studio;
+
+          import android.content.Context;
+          import android.graphics.Bitmap;
+          import android.graphics.BitmapFactory;
+          import android.graphics.Matrix;
+          import android.media.ExifInterface;
+          import android.net.Uri;
+          import org.json.JSONArray;
+          import org.json.JSONObject;
+          import java.io.File;
+          import java.io.FileOutputStream;
+          import java.io.InputStream;
+          import java.io.OutputStream;
+          import java.util.ArrayList;
+          import java.util.List;
+
+          public class Store {
+            public static class Layer {
+              public String file, name;
+              public boolean on = true;
+              public int size = 40, x = 50, y = 50, op = 100;
+              public Bitmap bmp;
+            }
+
+            public static final List<Layer> layers = new ArrayList<>();
+            public static boolean running = false;
+            private static boolean loaded = false;
+
+            public static synchronized void load(Context c) {
+              if (loaded) return;
+              loaded = true;
+              try {
+                String s = c.getSharedPreferences("p", 0).getString("layers", "[]");
+                JSONArray a = new JSONArray(s);
+                for (int i = 0; i < a.length(); i++) {
+                  JSONObject o = a.getJSONObject(i);
+                  Layer l = new Layer();
+                  l.file = o.getString("file");
+                  l.name = o.optString("name", "Photo");
+                  l.on = o.optBoolean("on", true);
+                  l.size = o.optInt("size", 40);
+                  l.x = o.optInt("x", 50);
+                  l.y = o.optInt("y", 50);
+                  l.op = o.optInt("op", 100);
+                  l.bmp = BitmapFactory.decodeFile(new File(c.getFilesDir(), l.file).getAbsolutePath());
+                  if (l.bmp != null) layers.add(l);
+                }
+              } catch (Exception e) {
+              }
+            }
+
+            public static synchronized void save(Context c) {
+              try {
+                JSONArray a = new JSONArray();
+                for (Layer l : layers) {
+                  JSONObject o = new JSONObject();
+                  o.put("file", l.file);
+                  o.put("name", l.name);
+                  o.put("on", l.on);
+                  o.put("size", l.size);
+                  o.put("x", l.x);
+                  o.put("y", l.y);
+                  o.put("op", l.op);
+                  a.put(o);
+                }
+                c.getSharedPreferences("p", 0).edit().putString("layers", a.toString()).apply();
+              } catch (Exception e) {
+              }
+            }
+
+            public static Layer decode(Context c, Uri uri, String name) throws Exception {
+              File tmp = new File(c.getCacheDir(), "tmp.bin");
+              InputStream in = c.getContentResolver().openInputStream(uri);
+              OutputStream os = new FileOutputStream(tmp);
+              byte[] buf = new byte[65536];
+              int n;
+              while ((n = in.read(buf)) > 0) os.write(buf, 0, n);
+              os.close();
+              in.close();
+              BitmapFactory.Options o = new BitmapFactory.Options();
+              o.inJustDecodeBounds = true;
+              BitmapFactory.decodeFile(tmp.getAbsolutePath(), o);
+              int max = Math.max(o.outWidth, o.outHeight);
+              int ss = 1;
+              while (max / ss > 1600) ss *= 2;
+              o = new BitmapFactory.Options();
+              o.inSampleSize = ss;
+              Bitmap b = BitmapFactory.decodeFile(tmp.getAbsolutePath(), o);
+              if (b == null) throw new Exception("decode failed");
+              int deg = 0;
+              try {
+                int ori = new ExifInterface(tmp.getAbsolutePath()).getAttributeInt(ExifInterface.TAG_ORIENTATION, 1);
+                if (ori == 6) deg = 90;
+                else if (ori == 3) deg = 180;
+                else if (ori == 8) deg = 270;
+              } catch (Exception e) {
+              }
+              if (deg != 0) {
+                Matrix m = new Matrix();
+                m.postRotate(deg);
+                b = Bitmap.createBitmap(b, 0, 0, b.getWidth(), b.getHeight(), m, true);
+              }
+              String f = "p" + System.nanoTime() + ".img";
+              FileOutputStream fo = new FileOutputStream(new File(c.getFilesDir(), f));
+              b.compress(b.hasAlpha() ? Bitmap.CompressFormat.PNG : Bitmap.CompressFormat.JPEG, 92, fo);
+              fo.close();
+              tmp.delete();
+              Layer l = new Layer();
+              l.file = f;
+              l.name = name;
+              l.bmp = b;
+              return l;
+            }
+
+            public static void remove(Context c, Layer l) {
+              layers.remove(l);
+              new File(c.getFilesDir(), l.file).delete();
+              save(c);
+            }
+          }
+          EOF
+
+      - name: Write OverlayService.java
+        run: |
+          cat > app/android/app/src/main/java/com/photooverlay/studio/OverlayService.java <<'EOF'
+          package com.photooverlay.studio;
+
+          import android.app.Notification;
+          import android.app.NotificationChannel;
+          import android.app.NotificationManager;
+          import android.app.PendingIntent;
+          import android.app.Service;
+          import android.content.Intent;
+          import android.content.pm.ServiceInfo;
+          import android.content.res.Configuration;
+          import android.graphics.PixelFormat;
+          import android.os.Build;
+          import android.os.IBinder;
+          import android.util.DisplayMetrics;
+          import android.view.Gravity;
+          import android.view.View;
+          import android.view.WindowManager;
+          import android.widget.ImageView;
+          import java.util.ArrayList;
+          import java.util.HashMap;
+          import java.util.Map;
+
+          public class OverlayService extends Service {
+            static OverlayService inst;
+            WindowManager wm;
+            final Map<Store.Layer, ImageView> views = new HashMap<>();
+
+            public static void refresh() {
+              if (inst != null) inst.sync();
+            }
+
+            @Override
+            public IBinder onBind(Intent i) {
+              return null;
+            }
+
+            @Override
+            public void onCreate() {
+              super.onCreate();
+              wm = (WindowManager) getSystemService(WINDOW_SERVICE);
+              inst = this;
+            }
+
+            @Override
+            public int onStartCommand(Intent intent, int flags, int startId) {
+              startFg();
+              Store.load(this);
+              Store.running = true;
+              sync();
+              return START_STICKY;
+            }
+
+            void startFg() {
+              String ch = "overlay";
+              if (Build.VERSION.SDK_INT >= 26) {
+                NotificationManager nm = getSystemService(NotificationManager.class);
+                nm.createNotificationChannel(new NotificationChannel(ch, "Overlay", NotificationManager.IMPORTANCE_LOW));
+              }
+              Intent oi = new Intent(this, MainActivity.class);
+              PendingIntent pi = PendingIntent.getActivity(this, 0, oi, PendingIntent.FLAG_IMMUTABLE);
+              Notification.Builder b = Build.VERSION.SDK_INT >= 26
+                  ? new Notification.Builder(this, ch)
+                  : new Notification.Builder(this);
+              Notification n = b.setContentTitle("Photo overlay is on")
+                  .setContentText("Tap to edit. Press STOP in the app to remove it.")
+                  .setSmallIcon(android.R.drawable.ic_menu_gallery)
+                  .setContentIntent(pi)
+                  .setOngoing(true)
+                  .build();
+              if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+              } else {
+                startForeground(1, n);
+              }
+            }
+
+            void sync() {
+              if (wm == null) return;
+              for (Store.Layer k : new ArrayList<>(views.keySet())) {
+                if (!Store.layers.contains(k)) {
+                  try {
+                    wm.removeView(views.get(k));
+                  } catch (Exception e) {
+                  }
+                  views.remove(k);
+                }
+              }
+              DisplayMetrics dm = new DisplayMetrics();
+              wm.getDefaultDisplay().getRealMetrics(dm);
+              for (Store.Layer l : Store.layers) {
+                if (l.bmp == null) continue;
+                int w = Math.max(4, (int) (dm.widthPixels * l.size / 100f));
+                int h = Math.max(4, (int) (w * (float) l.bmp.getHeight() / l.bmp.getWidth()));
+                WindowManager.LayoutParams p = new WindowManager.LayoutParams(
+                    w, h,
+                    Build.VERSION.SDK_INT >= 26
+                        ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                        : WindowManager.LayoutParams.TYPE_PHONE,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                    PixelFormat.TRANSLUCENT);
+                p.gravity = Gravity.TOP | Gravity.LEFT;
+                p.x = (int) (dm.widthPixels * l.x / 100f - w / 2f);
+                p.y = (int) (dm.heightPixels * l.y / 100f - h / 2f);
+                p.alpha = l.op / 100f;
+                ImageView iv = views.get(l);
+                try {
+                  if (iv == null) {
+                    iv = new ImageView(this);
+                    iv.setScaleType(ImageView.ScaleType.FIT_XY);
+                    iv.setImageBitmap(l.bmp);
+                    iv.setVisibility(l.on ? View.VISIBLE : View.INVISIBLE);
+                    wm.addView(iv, p);
+                    views.put(l, iv);
+                  } else {
+                    iv.setVisibility(l.on ? View.VISIBLE : View.INVISIBLE);
+                    wm.updateViewLayout(iv, p);
+                  }
+                } catch (Exception e) {
+                }
+              }
+            }
+
+            @Override
+            public void onConfigurationChanged(Configuration c) {
+              super.onConfigurationChanged(c);
+              sync();
+            }
+
+            @Override
+            public void onDestroy() {
+              for (ImageView v : views.values()) {
+                try {
+                  wm.removeView(v);
+                } catch (Exception e) {
+                }
+              }
+              views.clear();
+              inst = null;
+              Store.running = false;
+              super.onDestroy();
+            }
+          }
+          EOF
+
+      - name: Write MainActivity.java
+        run: |
+          cat > app/android/app/src/main/java/com/photooverlay/studio/MainActivity.java <<'EOF'
+          package com.photooverlay.studio;
+
+          import android.app.Activity;
+          import android.content.ClipData;
+          import android.content.Intent;
+          import android.graphics.Color;
+          import android.net.Uri;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.provider.Settings;
+          import android.view.Gravity;
+          import android.view.View;
+          import android.view.ViewGroup;
+          import android.widget.Button;
+          import android.widget.LinearLayout;
+          import android.widget.ScrollView;
+          import android.widget.SeekBar;
+          import android.widget.TextView;
+          import android.widget.Toast;
+          import java.util.ArrayList;
+          import java.util.List;
+
+          public class MainActivity extends Activity {
+            Store.Layer cur;
+            LinearLayout list, ctl;
+            TextView status;
+            Button startBtn, allBtn, onBtn;
+            final List<Sl> sliders = new ArrayList<>();
+
+            interface IntSet { void set(Store.Layer l, int v); }
+            interface IntGet { int get(Store.Layer l); }
+
+            int dp(int v) {
+              return (int) (v * getResources().getDisplayMetrics().density);
+            }
+
+            Button btn(String t, View.OnClickListener c) {
+              Button b = new Button(this);
+              b.setText(t);
+              b.setAllCaps(false);
+              b.setTextColor(Color.WHITE);
+              b.setBackgroundColor(Color.rgb(51, 51, 51));
+              b.setOnClickListener(c);
+              LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                  ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+              lp.setMargins(0, dp(4), 0, dp(4));
+              b.setLayoutParams(lp);
+              return b;
+            }
+
+            TextView tv(String t, int size) {
+              TextView v = new TextView(this);
+              v.setText(t);
+              v.setTextSize(size);
+              v.setTextColor(Color.WHITE);
+              return v;
+            }
+
+            class Sl {
+              SeekBar bar = new SeekBar(MainActivity.this);
+              TextView val = tv("", 14);
+              int min;
+              IntGet g;
+
+              Sl(LinearLayout parent, String label, int min, int max, IntGet g, final IntSet st) {
+                this.min = min;
+                this.g = g;
+                final int mn = min;
+                LinearLayout row = new LinearLayout(MainActivity.this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                TextView t = tv(label, 14);
+                t.setWidth(dp(90));
+                bar.setMax(max - min);
+                val.setWidth(dp(50));
+                val.setGravity(Gravity.RIGHT);
+                row.addView(t);
+                row.addView(bar, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+                row.addView(val);
+                parent.addView(row);
+                bar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                  public void onProgressChanged(SeekBar b, int p, boolean u) {
+                    if (u && cur != null) {
+                      st.set(cur, p + mn);
+                      val.setText("" + (p + mn));
+                      changed();
+                    }
+                  }
+                  public void onStartTrackingTouch(SeekBar b) {}
+                  public void onStopTrackingTouch(SeekBar b) {}
+                });
+                sliders.add(this);
+              }
+
+              void show() {
+                if (cur != null) {
+                  bar.setProgress(g.get(cur) - min);
+                  val.setText("" + g.get(cur));
+                }
+              }
+            }
+
+            @Override
+            protected void onCreate(Bundle b) {
+              super.onCreate(b);
+              Store.load(this);
+              if (Build.VERSION.SDK_INT >= 33) {
+                requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 1);
+              }
+              ScrollView sv = new ScrollView(this);
+              sv.setBackgroundColor(Color.rgb(17, 17, 17));
+              LinearLayout root = new LinearLayout(this);
+              root.setOrientation(LinearLayout.VERTICAL);
+              root.setPadding(dp(14), dp(40), dp(14), dp(40));
+              sv.addView(root);
+
+              root.addView(tv("Photo Overlay Studio", 22));
+              status = tv("", 13);
+              status.setPadding(0, dp(6), 0, dp(6));
+              root.addView(status);
+
+              root.addView(btn("1. Allow display over other apps", v -> {
+                Intent i = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:" + getPackageName()));
+                startActivity(i);
+              }));
+              root.addView(btn("2. Add photos", v -> {
+                Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+                i.setType("image/*");
+                i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                startActivityForResult(Intent.createChooser(i, "Pick photos"), 7);
+              }));
+              startBtn = btn("3. START overlay", v -> toggleOverlay());
+              root.addView(startBtn);
+              allBtn = btn("Hide all photos", v -> {
+                boolean any = false;
+                for (Store.Layer l : Store.layers) if (l.on) any = true;
+                for (Store.Layer l : Store.layers) l.on = !any;
+                rebuild();
+              });
+              root.addView(allBtn);
+
+              list = new LinearLayout(this);
+              list.setOrientation(LinearLayout.VERTICAL);
+              root.addView(list);
+
+              ctl = new LinearLayout(this);
+              ctl.setOrientation(LinearLayout.VERTICAL);
+              ctl.setVisibility(View.GONE);
+              root.addView(ctl);
+
+              onBtn = btn("Photo: ON", v -> {
+                if (cur != null) {
+                  cur.on = !cur.on;
+                  rebuild();
+                }
+              });
+              ctl.addView(onBtn);
+              new Sl(ctl, "Size", 2, 300, l -> l.size, (l, x) -> l.size = x);
+              new Sl(ctl, "X left/right", -150, 250, l -> l.x, (l, x) -> l.x = x);
+              new Sl(ctl, "Y up/down", -150, 250, l -> l.y, (l, x) -> l.y = x);
+              new Sl(ctl, "Opacity", 5, 100, l -> l.op, (l, x) -> l.op = x);
+
+              LinearLayout r1 = new LinearLayout(this);
+              r1.setOrientation(LinearLayout.HORIZONTAL);
+              r1.addView(spacer());
+              r1.addView(arrow("\u25B2", 0, -1));
+              r1.addView(spacer());
+              LinearLayout r2 = new LinearLayout(this);
+              r2.setOrientation(LinearLayout.HORIZONTAL);
+              r2.addView(arrow("\u25C0", -1, 0));
+              r2.addView(arrow("\u25BC", 0, 1));
+              r2.addView(arrow("\u25B6", 1, 0));
+              ctl.addView(r1);
+              ctl.addView(r2);
+
+              ctl.addView(btn("Bring to front", v -> {
+                if (cur != null) {
+                  Store.layers.remove(cur);
+                  Store.layers.add(cur);
+                  rebuild();
+                }
+              }));
+              ctl.addView(btn("Send to back", v -> {
+                if (cur != null) {
+                  Store.layers.remove(cur);
+                  Store.layers.add(0, cur);
+                  rebuild();
+                }
+              }));
+              ctl.addView(btn("Delete photo", v -> {
+                if (cur != null) {
+                  Store.remove(this, cur);
+                  cur = Store.layers.isEmpty() ? null : Store.layers.get(Store.layers.size() - 1);
+                  rebuild();
+                }
+              }));
+
+              setContentView(sv);
+              if (!Store.layers.isEmpty()) cur = Store.layers.get(Store.layers.size() - 1);
+              rebuild();
+            }
+
+            View spacer() {
+              View s = new View(this);
+              s.setLayoutParams(new LinearLayout.LayoutParams(0, 1, 1));
+              return s;
+            }
+
+            Button arrow(String t, final int dx, final int dy) {
+              Button b = btn(t, v -> {
+                if (cur != null) {
+                  cur.x += dx;
+                  cur.y += dy;
+                  rebuild();
+                }
+              });
+              b.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+              return b;
+            }
+
+            void toggleOverlay() {
+              if (Store.running) {
+                stopService(new Intent(this, OverlayService.class));
+                Store.running = false;
+              } else {
+                if (Build.VERSION.SDK_INT >= 23 && !Settings.canDrawOverlays(this)) {
+                  Toast.makeText(this, "Tap button 1 and allow display over other apps", Toast.LENGTH_LONG).show();
+                  return;
+                }
+                if (Store.layers.isEmpty()) {
+                  Toast.makeText(this, "Add photos first", Toast.LENGTH_LONG).show();
+                  return;
+                }
+                Intent si = new Intent(this, OverlayService.class);
+                if (Build.VERSION.SDK_INT >= 26) startForegroundService(si);
+                else startService(si);
+                Store.running = true;
+              }
+              updateStatus();
+            }
+
+            void changed() {
+              Store.save(this);
+              OverlayService.refresh();
+            }
+
+            void rebuild() {
+              list.removeAllViews();
+              for (int i = 0; i < Store.layers.size(); i++) {
+                final Store.Layer l = Store.layers.get(i);
+                LinearLayout r = new LinearLayout(this);
+                r.setOrientation(LinearLayout.HORIZONTAL);
+                Button eye = btn(l.on ? "ON" : "OFF", v -> {
+                  l.on = !l.on;
+                  rebuild();
+                });
+                eye.setBackgroundColor(l.on ? Color.rgb(34, 170, 119) : Color.rgb(85, 34, 34));
+                eye.setLayoutParams(new LinearLayout.LayoutParams(dp(70), ViewGroup.LayoutParams.WRAP_CONTENT));
+                Button nm = btn((i + 1) + ". " + l.name, v -> {
+                  cur = l;
+                  rebuild();
+                });
+                nm.setBackgroundColor(l == cur ? Color.rgb(68, 170, 255) : Color.rgb(51, 51, 51));
+                nm.setTextColor(l == cur ? Color.BLACK : Color.WHITE);
+                nm.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+                r.addView(eye);
+                r.addView(nm);
+                list.addView(r);
+              }
+              ctl.setVisibility(cur == null ? View.GONE : View.VISIBLE);
+              if (cur != null) {
+                onBtn.setText(cur.on ? "Photo: ON (tap to hide)" : "Photo: OFF (tap to show)");
+                onBtn.setBackgroundColor(cur.on ? Color.rgb(34, 170, 119) : Color.rgb(85, 34, 34));
+                for (Sl s : sliders) s.show();
+              }
+              boolean any = false;
+              for (Store.Layer l : Store.layers) if (l.on) any = true;
+              allBtn.setText(any ? "Hide all photos" : "Show all photos");
+              changed();
+              updateStatus();
+            }
+
+            void updateStatus() {
+              boolean ok = Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(this);
+              status.setText("Permission: " + (ok ? "OK" : "NOT GRANTED (tap button 1)")
+                  + "\nOverlay: " + (Store.running ? "ON (stays after you close the app)" : "OFF")
+                  + "\nPhotos: " + Store.layers.size());
+              startBtn.setText(Store.running ? "3. STOP overlay" : "3. START overlay");
+              startBtn.setBackgroundColor(Store.running ? Color.rgb(170, 51, 51) : Color.rgb(34, 136, 68));
+            }
+
+            @Override
+            protected void onResume() {
+              super.onResume();
+              updateStatus();
+            }
+
+            @Override
+            protected void onActivityResult(int req, int res, final Intent data) {
+              super.onActivityResult(req, res, data);
+              if (req != 7 || res != RESULT_OK || data == null) return;
+              final List<Uri> uris = new ArrayList<>();
+              ClipData cd = data.getClipData();
+              if (cd != null) {
+                for (int i = 0; i < cd.getItemCount(); i++) uris.add(cd.getItemAt(i).getUri());
+              } else if (data.getData() != null) {
+                uris.add(data.getData());
+              }
+              Toast.makeText(this, "Loading " + uris.size() + " photo(s)...", Toast.LENGTH_SHORT).show();
+              new Thread(() -> {
+                for (final Uri u : uris) {
+                  try {
+                    final Store.Layer l = Store.decode(this, u, "Photo " + (Store.layers.size() + 1));
+                    runOnUiThread(() -> {
+                      l.name = "Photo " + (Store.layers.size() + 1);
+                      Store.layers.add(l);
+                      cur = l;
+                      rebuild();
+                    });
+                    Thread.sleep(150);
+                  } catch (Exception e) {
+                    runOnUiThread(() -> Toast.makeText(this, "Could not load a photo", Toast.LENGTH_LONG).show());
+                  }
+                }
+              }).start();
+            }
+          }
+          EOF
 
       - name: Point Gradle at the Android SDK
         run: echo "sdk.dir=$ANDROID_HOME" > app/android/local.properties
@@ -211,4 +726,4 @@ jobs:
             --repo "${{ github.repository }}" \
             --target "${{ github.sha }}" \
             --title "Photo Overlay Studio v${{ github.run_number }}" \
-            --notes "Debug APK. Download and install on Android."
+            --notes "Overlay APK. Download and install on Android."
